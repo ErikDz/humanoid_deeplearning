@@ -4,6 +4,9 @@ import torch.nn as nn
 import torch.optim as optim
 import numpy as np
 
+discount_factor = 0.99  # Discount factor for future rewards
+eps = 1e-8  # Small epsilon value to prevent division by zero in normalization
+
 def compute_jump_reward(observation, info):
     z_coord_of_torso = observation[0]  # Assuming the z-coordinate of the torso indicates height
     velocity_z_coord_of_torso = observation[24]  # Assuming this is the vertical velocity of the torso
@@ -78,47 +81,6 @@ optimizer = optim.Adam(rnn_policy.parameters(), lr=learning_rate)
 
 # Training loop
 num_episodes = 1000
-"""
-for episode in range(num_episodes):
-    observation = env.reset()
-    hidden_state = None
-
-    done = False
-    total_reward = 0
-    
-    while not done:
-        # Format observation for RNN input
-        x = torch.tensor(observation, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
-        
-        # Get action from RNN policy
-        action, hidden_state = rnn_policy(x, hidden_state)
-        log_prob = action.log_prob()  # Log probability required for policy gradient
-        
-        # Apply action
-        observation, reward, done, info = env.step(action.detach().numpy().squeeze(0))
-        
-        total_reward += reward
-        
-        # Artificially create a "jump" goal for training purposes
-        # In practice, you would train the model with a proper RL algorithm
-        jump_reward = compute_jump_reward(observation, info)
-        total_reward += jump_reward
-        
-        
-        # Your training update would go here
-        # This may involve calculating the loss function
-        # and using it to update the RNN's parameters
-        optimizer.zero_grad()
-        loss = compute_policy_gradient_loss(log_probs, rewards)
-        loss.backward()
-        optimizer.step()
-    
-    # Print out the performance every few episodes
-    if episode % 10 == 0:
-        print(f'Episode {episode}: Total Reward: {total_reward}')
-"""
-
-# ... [previous code] ...
 
 for episode in range(num_episodes):
     observation = env.reset()
