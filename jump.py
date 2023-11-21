@@ -1,123 +1,98 @@
 import gymnasium as gym
-import torch
-import torch.nn as nn
-import torch.optim as optim
+from stable_baselines3 import SAC, TD3, A2C
+import os
+from gymnasium import Wrapper
 import numpy as np
 
-discount_factor = 0.99  # Discount factor for future rewards
-eps = 1e-8  # Small epsilon value to prevent division by zero in normalization
 
-def compute_jump_reward(observation, info):
-    z_coord_of_torso = observation[0]  # Assuming the z-coordinate of the torso indicates height
-    velocity_z_coord_of_torso = observation[24]  # Assuming this is the vertical velocity of the torso
+# Create directories to hold models and logs
+model_dir = "models"
+log_dir = "logs"
+os.makedirs(model_dir, exist_ok=True)
+os.makedirs(log_dir, exist_ok=True)
 
-    # A simple heuristic: if the torso's z-velocity is positive and it's above a certain threshold
-    # we could consider it's attempting to jump
-    jump_initiated_reward = 0
-    if velocity_z_coord_of_torso > 0.1 and z_coord_of_torso > 1.0:  # these thresholds are arbitrary and need tuning
-        jump_initiated_reward = 1
+def train(env, sb3_algo):
+    if sb3_algo == 'SAC':
+        model = SAC('MlpPolicy', env, verbose=1, device='cuda', tensorboard_log=log_dir)
+    elif sb3_algo == 'TD3':
+        model = TD3('MlpPolicy', env, verbose=1, device='cuda', tensorboard_log=log_dir)
+    elif sb3_algo == 'A2C':
+        model = A2C('MlpPolicy', env, verbose=1, device='cuda', tensorboard_log=log_dir)
+    else:
+        print('Algorithm not found')
+        return
 
-    # Reward for landing safely, could be as simple as not ending the episode
-    safe_landing_reward = 0
-    if not done:  # if the humanoid is still alive after the jump
-        safe_landing_reward = 1
+    TIMESTEPS = 25000
+    iters = 0
+    while True:
+        iters += 1
+        model.learn(total_timesteps=TIMESTEPS, reset_num_timesteps=False)
+        model.save(f"{model_dir}/{sb3_algo}_{TIMESTEPS*iters}")
 
-    jump_reward = jump_initiated_reward + safe_landing_reward
-    return jump_reward
+def test(env, sb3_algo, path_to_model):
+    if sb3_algo == 'SAC':
+        model = SAC.load(path_to_model, env=env)
+    elif sb3_algo == 'TD3':
+        model = TD3.load(path_to_model, env=env)
+    elif sb3_algo == 'A2C':
+        model = A2C.load(path_to_model, env=env)
+    else:
+        print('Algorithm not found')
+        return
 
-def compute_policy_gradient_loss(log_probs, rewards):
-    """
-    Calculate the policy gradient loss
-    :param log_probs: Log probabilities of the actions taken
-    :param rewards: Rewards received for each action
-    :return: Policy gradient loss
-    """
-    # We need to calculate the cumulative rewards
-    discounted_rewards = []
-    total_reward = 0
-    for reward in rewards[::-1]:  # reverse rewards list
-        total_reward = reward + discount_factor * total_reward
-        discounted_rewards.insert(0, total_reward)  # insert at the beginning
-    
-    # Normalize the rewards
-    discounted_rewards = torch.tensor(discounted_rewards)
-    discounted_rewards = (discounted_rewards - discounted_rewards.mean()) / (discounted_rewards.std() + eps)
-
-    # Combine the log probabilities with rewards
-    policy_gradient = []
-    for log_prob, reward in zip(log_probs, discounted_rewards):
-        policy_gradient.append(-log_prob * reward)  # Negative for gradient ascent
-
-    return torch.stack(policy_gradient).sum()
-
-
-
-# Define the RNN architecture
-class RNNPolicy(nn.Module):
-    def __init__(self, input_size, hidden_size, output_size):
-        super(RNNPolicy, self).__init__()
-        self.rnn = nn.RNN(input_size, hidden_size)
-        self.fc = nn.Linear(hidden_size, output_size)
-    
-    def forward(self, x, hidden):
-        x, hidden = self.rnn(x, hidden)
-        x = self.fc(x)
-        return x, hidden
-
-# Initialize environment
-env = gym.make('Humanoid-v4')
-
-# Define hyperparameters
-input_size = env.observation_space.shape[0]
-hidden_size = 256
-output_size = env.action_space.shape[0]
-learning_rate = 1e-3
-
-# Instantiate the RNN policy
-rnn_policy = RNNPolicy(input_size, hidden_size, output_size)
-
-# Define optimizer
-optimizer = optim.Adam(rnn_policy.parameters(), lr=learning_rate)
-
-# Training loop
-num_episodes = 1000
-
-for episode in range(num_episodes):
-    observation = env.reset()
-    hidden_state = None
-
+    obs = env.reset()
     done = False
-    total_reward = 0
-    log_probs = []
-    rewards = []
+    extra_steps = 500
+    while True:
+        action, _ = model.predict(obs)
+        obs, _, done, _ = env.step(action)
 
-    while not done:
-        observation_array = np.array(observation)
-        x = torch.tensor(observation_array, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
+        if done:
+            extra_steps -= 1
+            if extra_steps < 0:
+                break
+import gymnasium as gym
+from stable_baselines3 import SAC
+import numpy as np
 
-        action_values, hidden_state = rnn_policy(x, hidden_state)
-        
-        # Apply an activation function and scale to the action space
-        # For example, action = torch.tanh(action_values)
-        action = torch.tanh(action_values)
+class JumpRewardWrapper(gym.Wrapper):
+    def __init__(self, env):
+        super().__init__(env)
+        self.jump_reward_weight = 10.0  # Weight for the jump reward
+        self.desired_height = 1.5       # Desired height to achieve for jumping
 
-        # Convert action to numpy array and apply to the environment
-        observation, reward, done, info = env.step(action.detach().numpy().squeeze(0))
-        total_reward += reward
+    def step(self, action):
+        obs, reward, done, info, extra = self.env.step(action)
+        jump_reward = self.calculate_jump_reward(obs)
+        reward += jump_reward
+        return obs, reward, done, info, extra
 
-        # Compute additional rewards and store them
-        jump_reward = compute_jump_reward(observation, info)
-        total_reward += jump_reward
+    def calculate_jump_reward(self, obs):
+        # Assuming the z-coordinate of the torso is the first element in the observation
+        torso_height = obs[0]
+        if torso_height > self.desired_height:
+            return self.jump_reward_weight
+        return 0.0
 
-        # Store log probabilities and rewards for policy gradient update
-        log_prob = action.log_prob()
-        log_probs.append(log_prob)
-        rewards.append(reward)
+# Rest of your code remains the same
+if __name__ == '__main__':
+    gymenv_name = 'Humanoid-v4'
+    sb3_algo = 'SAC'
+    path_to_model = 'path_to_your_model_file'
 
-        optimizer.zero_grad()
-        loss = compute_policy_gradient_loss(log_probs, rewards)
-        loss.backward()
-        optimizer.step()
-    
-    if episode % 10 == 0:
-        print(f'Episode {episode}: Total Reward: {total_reward}')
+    train_model = True
+    test_model = False
+
+    if train_model:
+        gymenv = gym.make(gymenv_name, render_mode=None)
+        wrapped_env = JumpRewardWrapper(gymenv)  # Wrap the environment
+        train(wrapped_env, sb3_algo)
+
+    if test_model:
+        if os.path.isfile(path_to_model):
+            gymenv = gym.make(gymenv_name, render_mode='human')
+            wrapped_env = JumpRewardWrapper(gymenv)  # Wrap the environment
+            test(wrapped_env, sb3_algo, path_to_model=path_to_model)
+        else:
+            print(f'{path_to_model} not found.')
+
