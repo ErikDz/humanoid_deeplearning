@@ -1,7 +1,7 @@
 import gymnasium as gym
 from stable_baselines3 import SAC, TD3, A2C
 import os
-from gymnasium import Wrapper
+from gymnasium import RewardWrapper
 import numpy as np
 
 
@@ -51,28 +51,47 @@ def test(env, sb3_algo, path_to_model):
             extra_steps -= 1
             if extra_steps < 0:
                 break
-import gymnasium as gym
-from stable_baselines3 import SAC
-import numpy as np
 
-class JumpRewardWrapper(gym.Wrapper):
-    def __init__(self, env):
-        super().__init__(env)
-        self.jump_reward_weight = 10.0  # Weight for the jump reward
-        self.desired_height = 1.5       # Desired height to achieve for jumping
 
-    def step(self, action):
-        obs, reward, done, info, extra = self.env.step(action)
-        jump_reward = self.calculate_jump_reward(obs)
-        reward += jump_reward
-        return obs, reward, done, info, extra
 
-    def calculate_jump_reward(self, obs):
-        # Assuming the z-coordinate of the torso is the first element in the observation
-        torso_height = obs[0]
-        if torso_height > self.desired_height:
-            return self.jump_reward_weight
-        return 0.0
+from gym import RewardWrapper
+env_name = 'Humanoid-v4'
+env = gym.make(env_name, render_mode=None)
+
+def jump_reward(reward):
+    #print(f"Initial reward {reward}")
+    torso=env.state_vector()[2] #position of torso
+    z_orientation=env.state_vector()[2+3]
+    z_velocity=env.state_vector()[2+24]
+    #print("State vector")
+    np.set_printoptions(precision=6, suppress=True)
+    #print(env.state_vector())
+    salto=0
+    #print(f"pos torso {torso:.3f}")
+    if (torso > 1.5):
+        salto+=10
+    else:
+        salto-=10
+    if (-0.18 <= z_orientation <= 0.18):
+        salto+=10
+    else:
+        salto-=10
+    if (z_velocity > 0):
+        salto+=10
+    else:
+        salto-=10
+
+    default_rewards= env.healthy_reward #Siguiendo la fórmula de arriba accediendo a los atributos básidos
+    #print(f"Default {default_rewards}")
+    #print(f"Salto {salto}")
+    reward=reward + salto + default_rewards
+    #print(f"Final {reward}")
+    #print(env.healthy_reward)
+    return reward
+
+
+env = gym.wrappers.TransformReward(env, jump_reward)
+env.reset()
 
 # Rest of your code remains the same
 if __name__ == '__main__':
@@ -80,8 +99,8 @@ if __name__ == '__main__':
     sb3_algo = 'SAC'
     path_to_model = 'path_to_your_model_file'
 
-    train_model = True
-    test_model = False
+    train_model = False
+    test_model = True
 
     if train_model:
         gymenv = gym.make(gymenv_name, render_mode=None)

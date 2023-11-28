@@ -1,0 +1,5 @@
+*.zip
+/good_stuff
+/models
+/logs
+basic_jump.ipynb
