@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>GPT4 Reward function creator</title>
+    <script type="text/javascript">
+        function showThinkingMessage() {
+            document.getElementById("apiResponse").innerHTML = "thinking...";
+        }
+    </script>
+</head>
+<body>
+    <h1>Flask API Demo</h1>
+    <form method="POST" onsubmit="showThinkingMessage()">
+        <label for="prompt">Enter what your prompt:</label>
+        <input type="text" id="prompt" name="prompt" required>
+        <input type="submit" value="Submit">
+    </form>
+    <div id="apiResponse"></div>
+    {% if response %}
+        <h2>Reward function:</h2>
+        <pre><code>{{ response }}</code></pre>
+    {% endif %}
+</body>
+</html>
